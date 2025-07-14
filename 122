@@ -1,0 +1,104 @@
+import subprocess
+import tkinter as tk
+from tkinter import messagebox
+import platform
+import ctypes
+
+def run_powershell(command):
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command", command],
+            capture_output=True,
+            text=True
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        return str(e)
+
+def check_wifi_band():
+    output = run_powershell("Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' } | Select-Object Name")
+    if "Wi-Fi" in output or "Wireless" in output:
+        return "✅ Wi-Fi адаптер знайдено"
+    else:
+        return "❌ Wi-Fi адаптер не знайдено або не активний"
+
+def check_oculus_service():
+    status = run_powershell("Get-Service -Name OculusVR | Select-Object Status")
+    if "Running" in status:
+        return "✅ Служба Oculus працює"
+    elif "Stopped" in status:
+        return "⚠️ Служба Oculus зупинена"
+    else:
+        return "❌ Служба Oculus не знайдена"
+
+def check_power_save():
+    output = run_powershell("""
+    $adapters = Get-WmiObject -Namespace root\\wmi -Class MSNdis_80211_PowerMode
+    if ($adapters) { '❌ Увімкнено енергозбереження Wi-Fi' } else { '✅ Енергозбереження вимкнено' }
+    """)
+    return output
+
+def disable_wifi_power_save():
+    script = """
+    $adapters = Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' }
+    foreach ($adapter in $adapters) {
+        powercfg -setdcvalueindex SCHEME_CURRENT SUB_POWER NICSPolicy 0
+        powercfg -setacvalueindex SCHEME_CURRENT SUB_POWER NICSPolicy 0
+    }
+    powercfg -SetActive SCHEME_CURRENT
+    """
+    run_powershell(script)
+
+def restart_oculus_service():
+    run_powershell("Restart-Service -Name OculusVR")
+
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+# ---------------- GUI ------------------
+
+def check_all():
+    result = []
+    result.append(check_wifi_band())
+    result.append(check_oculus_service())
+    result.append(check_power_save())
+    output_text.delete("1.0", tk.END)
+    for r in result:
+        output_text.insert(tk.END, r + "\n")
+
+def fix_all():
+    disable_wifi_power_save()
+    restart_oculus_service()
+    messagebox.showinfo("Готово", "Основні проблеми виправлено!")
+
+# ---------------- TKINTER ------------------
+
+if not is_admin():
+    tk.Tk().withdraw()
+    messagebox.showwarning("Адміністратор", "Будь ласка, запусти цю програму як Адміністратор.")
+    exit()
+
+root = tk.Tk()
+root.title("Oculus AirLink Assistant")
+root.geometry("500x350")
+root.resizable(False, False)
+
+label = tk.Label(root, text="Перевірка налаштувань системи для Meta Quest 3 Air Link", font=("Segoe UI", 11))
+label.pack(pady=10)
+
+output_text = tk.Text(root, height=10, width=60)
+output_text.pack()
+
+check_button = tk.Button(root, text="Перевірити", command=check_all, width=20, bg="#4CAF50", fg="white")
+check_button.pack(pady=5)
+
+fix_button = tk.Button(root, text="Виправити", command=fix_all, width=20, bg="#f39c12", fg="white")
+fix_button.pack(pady=5)
+
+exit_button = tk.Button(root, text="Вийти", command=root.destroy, width=20)
+exit_button.pack(pady=10)
+
+root.mainloop()
